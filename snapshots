@@ -1,0 +1,53 @@
+import boto3
+from datetime import datetime, timezone, timedelta
+
+def lambda_handler(event, context):
+    # Initialize EC2 client
+    ec2_client = boto3.client('ec2')
+    
+    # Calculate the time 6 months ago from now (timezone-aware)
+    six_months_ago = datetime.now(timezone.utc) - timedelta(days=180)  # 180 days is roughly 6 months
+    
+    # Get all the AMIs owned by this account
+    response = ec2_client.describe_images(Owners=['self'])
+    
+    amis_to_delete = []
+    snapshots_to_delete = []
+    
+    # Loop through the AMIs and identify those older than 6 months
+    for image in response['Images']:
+        creation_date = image['CreationDate']
+        
+        # Parse the creation date and ensure it's timezone-aware (UTC)
+        try:
+            creation_date_obj = datetime.strptime(creation_date, '%Y-%m-%dT%H:%M:%S.%fZ')
+        except ValueError:
+            # Handle case if the milliseconds format is missing
+            creation_date_obj = datetime.strptime(creation_date, '%Y-%m-%dT%H:%M:%S.%fZ'.split('.')[0])
+        
+        # Make it timezone-aware (UTC)
+        creation_date_obj = creation_date_obj.replace(tzinfo=timezone.utc)
+        
+        # Now you can safely compare both timezone-aware datetimes
+        if creation_date_obj < six_months_ago:
+            amis_to_delete.append(image['ImageId'])
+            
+            # Gather snapshots associated with this AMI
+            for block_device in image['BlockDeviceMappings']:
+                if 'Ebs' in block_device:
+                    snapshots_to_delete.append(block_device['Ebs']['SnapshotId'])
+    
+    # Deregister the AMIs
+    for ami in amis_to_delete:
+        print(f'Deregistering AMI: {ami}')
+        ec2_client.deregister_image(ImageId=ami)
+    
+    # Delete associated snapshots
+    for snapshot in snapshots_to_delete:
+        print(f'Deleting Snapshot: {snapshot}')
+        ec2_client.delete_snapshot(SnapshotId=snapshot)
+    
+    return {
+        'statusCode': 200,
+        'body': f'Deleted {len(amis_to_delete)} AMIs and {len(snapshots_to_delete)} snapshots.'
+    }
