@@ -51,3 +51,7 @@ def lambda_handler(event, context):
         'statusCode': 200,
         'body': f'Deleted {len(amis_to_delete)} AMIs and {len(snapshots_to_delete)} snapshots.'
     }
+
+
+
+neww
